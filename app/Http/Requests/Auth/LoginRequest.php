@@ -2,14 +2,17 @@
 
 namespace App\Http\Requests\Auth;
 
+use App\Http\Requests\HandleApiFormRequest;
+use App\Models\User;
 use Illuminate\Auth\Events\Lockout;
-use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
-class LoginRequest extends FormRequest
+class LoginRequest extends HandleApiFormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
@@ -41,13 +44,38 @@ class LoginRequest extends FormRequest
     {
         $this->ensureIsNotRateLimited();
 
-        if (! Auth::attempt($this->only('email', 'password'), $this->boolean('remember'))) {
+        $user = User::query()
+            ->where('email', $this->email)
+            ->first();
+
+        if (! $user || ! Hash::check($this->password, $user->password)) {
             RateLimiter::hit($this->throttleKey());
 
+            // untuk api
+            if ($this->expectsJson()) {
+                throw new HttpResponseException(response()->json([
+                    'message' => __('Authentication failed'),
+                    'errors' => [
+                        'email' => [trans('auth.failed')],
+                    ],
+                ]));
+            }
+
+            // default ke web
             throw ValidationException::withMessages([
                 'email' => trans('auth.failed'),
             ]);
         }
+
+        Auth::login($user, $this->boolean('remember'));
+
+        // if (! Auth::attempt($this->only('email', 'password'), $this->boolean('remember'))) {
+        //     RateLimiter::hit($this->throttleKey());
+
+        //     throw ValidationException::withMessages([
+        //         'email' => trans('auth.failed'),
+        //     ]);
+        // }
 
         RateLimiter::clear($this->throttleKey());
     }
